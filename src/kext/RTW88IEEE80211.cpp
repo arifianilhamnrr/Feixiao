@@ -658,6 +658,15 @@ void RTW88IEEE80211::releaseSta()
         _hw->ops->sta_remove(_hw, _vif, _sta);
     rtw88_unregister_sta(_sta);
 
+    size_t txqSize = sizeof(struct ieee80211_txq) +
+                     (_hw ? _hw->txq_data_size : 0);
+    for (size_t i = 0; i < ARRAY_SIZE(_sta->txq); i++) {
+        if (_sta->txq[i]) {
+            IOFree(_sta->txq[i], txqSize);
+            _sta->txq[i] = nullptr;
+        }
+    }
+
     IOFree(_sta, _staAllocSize ? _staAllocSize : sizeof(struct ieee80211_sta));
     _sta = nullptr;
     _staAllocSize = 0;
@@ -796,11 +805,22 @@ IOReturn RTW88IEEE80211::start()
      * _hw->priv above. */
     if (_hw) {
         RTW88_STAGE("adding STA interface");
-        _vif = (struct ieee80211_vif *)IOMallocZero(
-            sizeof(struct ieee80211_vif) + 128);
+        _vifAllocSize = sizeof(struct ieee80211_vif) + _hw->vif_data_size;
+        _vif = (struct ieee80211_vif *)IOMallocZero(_vifAllocSize);
         if (_vif) {
             _vif->type = NL80211_IFTYPE_STATION;
             memcpy(_vif->addr, _macAddr, 6);
+            size_t txqSize = sizeof(struct ieee80211_txq) + _hw->txq_data_size;
+            _vif->txq = (struct ieee80211_txq *)IOMallocZero(txqSize);
+            if (!_vif->txq) {
+                IOFree(_vif, _vifAllocSize);
+                _vif = nullptr;
+                _vifAllocSize = 0;
+                return false;
+            }
+            _vif->txq->vif = _vif;
+            _vif->txq->tid = IEEE80211_NUM_TIDS;
+            _vif->txq->ac = IEEE80211_AC_BE;
             /* bss_conf.bssid must never be NULL — iterators dereference it
              * for every RX frame even before association. */
             _vif->bss_conf.bssid = _vif->bss_conf.bssid_buf;
@@ -851,8 +871,14 @@ void RTW88IEEE80211::stop()
         if (_hw->ops->remove_interface) {
             _hw->ops->remove_interface(_hw, _vif);
         }
-        IOFree(_vif, sizeof(*_vif) + 128);
+        if (_vif->txq) {
+            IOFree(_vif->txq,
+                   sizeof(struct ieee80211_txq) + _hw->txq_data_size);
+            _vif->txq = nullptr;
+        }
+        IOFree(_vif, _vifAllocSize);
         _vif = nullptr;
+        _vifAllocSize = 0;
     }
 
     if (_pcidev) rtw_pci_remove(_pcidev);
@@ -2165,6 +2191,33 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
             _sta->aid  = aid;
             _sta->wme  = true;
 
+            size_t txqSize = sizeof(struct ieee80211_txq) + _hw->txq_data_size;
+            bool txqReady = true;
+            for (size_t i = 0; i < ARRAY_SIZE(_sta->txq); i++) {
+                struct ieee80211_txq *txq =
+                    (struct ieee80211_txq *)IOMallocZero(txqSize);
+                if (!txq) {
+                    txqReady = false;
+                    break;
+                }
+                txq->vif = _vif;
+                txq->sta = _sta;
+                txq->tid = (uint8_t)i;
+                txq->ac = IEEE80211_AC_BE;
+                _sta->txq[i] = txq;
+            }
+            if (!txqReady) {
+                for (size_t i = 0; i < ARRAY_SIZE(_sta->txq); i++) {
+                    if (_sta->txq[i])
+                        IOFree(_sta->txq[i], txqSize);
+                }
+                IOFree(_sta, _staAllocSize);
+                _sta = nullptr;
+                _staAllocSize = 0;
+                _state = RTW88_STATE_IDLE;
+                return;
+            }
+
             /* Populate supported rates so rtw_update_sta_info() builds a
              * non-empty rate-adaptation mask. */
             _sta->deflink.supp_rates[NL80211_BAND_2GHZ] = 0xFFF; /* CCK+OFDM */
@@ -2205,6 +2258,10 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
                       _sta->deflink.vht_cap.vht_supported ? 1 : 0);
             } else {
                 IOLog("rtw88: sta_add failed: %d\n", staRet);
+                for (size_t i = 0; i < ARRAY_SIZE(_sta->txq); i++) {
+                    if (_sta->txq[i])
+                        IOFree(_sta->txq[i], txqSize);
+                }
                 IOFree(_sta, _staAllocSize);
                 _sta = nullptr;
                 _staAllocSize = 0;

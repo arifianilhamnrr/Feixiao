@@ -183,6 +183,7 @@ private:
     struct ieee80211_vif *_vif        = nullptr;
     struct ieee80211_sta *_sta        = nullptr;
     size_t              _staAllocSize = 0;
+    size_t              _vifAllocSize = 0;
     struct pci_dev     *_pcidev       = nullptr;
 
     IOWorkLoop         *_wl           = nullptr;
