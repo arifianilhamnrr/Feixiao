@@ -1,0 +1,59 @@
+name: Build Feixiao Wrapper
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ feixiao-mbuf-fix ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout Feixiao
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: Feixiao
+
+      - name: Clone pinned rtw88 core
+        run: |
+          git clone https://github.com/thegwchr/rtw88-stable.git rtw88-stable
+          git -C rtw88-stable checkout d029a677c49266fad86750714eb5612becd134d3
+          test "$(git -C rtw88-stable rev-parse HEAD)" = d029a677c49266fad86750714eb5612becd134d3
+          test -z "$(git -C rtw88-stable status --porcelain)"
+
+      - name: Download firmware blobs
+        run: |
+          cd Feixiao/firmware
+          for fw in rtw8822b_fw.bin rtw8822c_fw.bin rtw8821c_fw.bin \
+                    rtw8821a_fw.bin rtw8812a_fw.bin rtw8814a_fw.bin; do
+            if [ ! -s "$fw" ]; then
+              curl -fsSLO "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/rtw88/$fw"
+            fi
+          done
+
+      - name: Build from source
+        run: make -j1 all
+        working-directory: Feixiao
+
+      - name: Verify build inputs and output
+        run: |
+          test -z "$(git -C rtw88-stable status --porcelain)"
+          test "$(git -C rtw88-stable rev-parse HEAD)" = d029a677c49266fad86750714eb5612becd134d3
+          plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = 1.1.2
+          dwarfdump --uuid Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
+          shasum -a 256 Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
+
+      - name: Package artifact
+        run: |
+          uuid="$(dwarfdump --uuid Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88 | awk '{print $2}')"
+          cd Feixiao/build/out
+          zip -r "${RUNNER_TEMP}/Feixiao_1.1.2_${uuid}.zip" rtw88.kext rtw88ctl
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feixiao-1.1.2-mbuf-fix
+          path: ${{ runner.temp }}/Feixiao_1.1.2_*.zip
+          if-no-files-found: error

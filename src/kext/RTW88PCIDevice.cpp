@@ -712,7 +712,16 @@ mbuf_t RTW88PCIDevice::allocateInputPacket(uint32_t len)
      * consistent across every segment of the chain.  Hand-rolling this with
      * mbuf_allocpacket left m_len inconsistent with pkthdr.len, which the
      * dlil input validator rejects with "Failed mbuf validity check: len -14". */
-    return allocatePacket(len);
+    mbuf_t m = allocatePacket(len);
+    if (!m)
+        return nullptr;
+
+    if (!(mbuf_flags(m) & MBUF_PKTHDR)) {
+        freePacket(m);
+        return nullptr;
+    }
+    mbuf_pkthdr_setlen(m, len);
+    return m;
 }
 
 void RTW88PCIDevice::injectRxFrame(mbuf_t m)
@@ -727,18 +736,21 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
      * packet.  Validate BOTH length fields — the dlil validator panics on
      * m_len (printed as "len"), not just pkthdr.len.  mbuf_len/mbuf_pkthdr_len
      * return size_t, so a negative m_len shows up as a huge value here. */
+    mbuf_flags_t flags = mbuf_flags(m);
     size_t plen = mbuf_pkthdr_len(m);
     size_t mlen = mbuf_len(m);
-    if (plen < 14 || plen > 4096 || mlen < 14 || mlen > 4096) {
-        IOLog("rtw88: injectRxFrame: dropping bogus mbuf (pkthdr.len=%zu m_len=%zu)\n",
-              plen, mlen);
+    if (!(flags & MBUF_PKTHDR) || plen < 14 || plen > 4096 ||
+        mlen < 14 || mlen > 4096) {
+        IOLog("rtw88: injectRxFrame: dropping bogus mbuf (flags=0x%x pkthdr.len=%zu m_len=%zu)\n",
+              flags, plen, mlen);
         freePacket(m);
         return;
     }
 
     /* Queue + flush, matching the proven itlwm submission path.  Submitting
      * via the input queue keeps frame delivery off whatever thread called us. */
-    _iface->inputPacket(m, 0, IONetworkInterface::kInputOptionQueuePacket);
+    _iface->inputPacket(m, (UInt32)plen,
+                        IONetworkInterface::kInputOptionQueuePacket);
     _iface->flushInputQueue();
 
     IONetworkData *nd = _iface->getNetworkData(kIONetworkStatsKey);

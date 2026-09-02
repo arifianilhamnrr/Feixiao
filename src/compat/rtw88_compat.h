@@ -10,15 +10,10 @@
 #ifndef __nonstring
 #define __nonstring
 #endif
-/* __cold and __pure may be defined by sys/cdefs.h — guard and redefine */
-#ifdef __cold
-#undef __cold
-#endif
-#define __cold __attribute__((cold))
-#ifdef __pure
-#undef __pure
-#endif
-#define __pure __attribute__((pure))
+/* Pull in all compat headers in dependency order */
+#include "iokit_shim.h"
+
+/* Define this only after XNU headers have evaluated __has_attribute(). */
 #ifndef fallthrough
 #if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 7)
 #define fallthrough __attribute__((__fallthrough__))
@@ -27,8 +22,6 @@
 #endif
 #endif
 
-/* Pull in all compat headers in dependency order */
-#include "iokit_shim.h"
 #include "linux/types.h"
 #include "linux/device.h"
 #include "linux/bitops.h"
