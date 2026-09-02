@@ -656,6 +656,7 @@ void RTW88IEEE80211::releaseSta()
 
     if (_hw && _hw->ops && _hw->ops->sta_remove && _vif)
         _hw->ops->sta_remove(_hw, _vif, _sta);
+    rtw88_unregister_sta(_sta);
 
     IOFree(_sta, _staAllocSize ? _staAllocSize : sizeof(struct ieee80211_sta));
     _sta = nullptr;
@@ -2135,15 +2136,16 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
 
     const uint8_t *body    = skb->data + sizeof(struct ieee80211_hdr_3addr);
     uint32_t       bodylen = skb->len  - sizeof(struct ieee80211_hdr_3addr);
-    kfree_skb(skb);
 
     if (bodylen < 6) {
         IOLog("rtw88: assoc-resp too short\n");
+        kfree_skb(skb);
         _state = RTW88_STATE_IDLE;
         return;
     }
     uint16_t status = (uint16_t)(body[2] | (body[3] << 8));
     uint16_t aid    = (uint16_t)((body[4] | (body[5] << 8)) & 0x3FFF);
+    kfree_skb(skb);
 
     if (status != 0) {
         IOLog("rtw88: assoc failed status=%u\n", status);
@@ -2194,7 +2196,21 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
                     _sta->deflink.vht_cap = sband->vht_cap;
             }
 
-            _hw->ops->sta_add(_hw, _vif, _sta);
+            int staRet = _hw->ops->sta_add(_hw, _vif, _sta);
+            if (staRet == 0) {
+                rtw88_register_sta(_vif, _sta);
+                IOLog("rtw88: peer STA registered (AID=%u bw=%u HT=%d VHT=%d)\n",
+                      aid, _connChanWidth,
+                      _sta->deflink.ht_cap.ht_supported ? 1 : 0,
+                      _sta->deflink.vht_cap.vht_supported ? 1 : 0);
+            } else {
+                IOLog("rtw88: sta_add failed: %d\n", staRet);
+                IOFree(_sta, _staAllocSize);
+                _sta = nullptr;
+                _staAllocSize = 0;
+                _state = RTW88_STATE_IDLE;
+                return;
+            }
         }
     }
 

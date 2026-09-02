@@ -380,9 +380,23 @@ thread_call_t g_irq_thread_call = NULL;
  * ieee80211_iterate_active_interfaces_atomic can deliver the iterator to
  * rtw88's internal callbacks (e.g. rtw_build_rsvd_page_iter). */
 static struct ieee80211_vif *g_rtw88_vif = NULL;
+static struct ieee80211_vif *g_rtw88_sta_vif = NULL;
+static struct ieee80211_sta *g_rtw88_sta = NULL;
 
 void rtw88_register_vif(struct ieee80211_vif *vif)   { g_rtw88_vif = vif; }
 void rtw88_unregister_vif(void)                       { g_rtw88_vif = NULL; }
+void rtw88_register_sta(struct ieee80211_vif *vif, struct ieee80211_sta *sta)
+{
+    g_rtw88_sta_vif = vif;
+    __atomic_store_n(&g_rtw88_sta, sta, __ATOMIC_RELEASE);
+}
+void rtw88_unregister_sta(struct ieee80211_sta *sta)
+{
+    if (__atomic_load_n(&g_rtw88_sta, __ATOMIC_ACQUIRE) == sta) {
+        __atomic_store_n(&g_rtw88_sta, NULL, __ATOMIC_RELEASE);
+        g_rtw88_sta_vif = NULL;
+    }
+}
 
 /* Kext-registered hook fired after the IRQ bottom-half (tx_isr) has run and
  * freed TX descriptors.  Runs on the thread_call thread with no rtw88 locks
@@ -620,7 +634,13 @@ void ieee80211_iterate_active_interfaces(
 void ieee80211_iterate_stations_atomic(
     struct ieee80211_hw *hw,
     void (*iterator)(void *data, struct ieee80211_sta *sta),
-    void *data) {}
+    void *data)
+{
+    struct ieee80211_sta *sta =
+        __atomic_load_n(&g_rtw88_sta, __ATOMIC_ACQUIRE);
+    if (sta && iterator)
+        iterator(data, sta);
+}
 
 void ieee80211_iter_keys(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
     void (*iter)(struct ieee80211_hw *, struct ieee80211_vif *,
@@ -792,12 +812,27 @@ void ieee80211_queue_delayed_work(struct ieee80211_hw *hw,
 
 struct ieee80211_sta *ieee80211_find_sta(struct ieee80211_vif *vif,
                                           const u8 *addr)
-{ (void)vif; (void)addr; return NULL; }
+{
+    struct ieee80211_sta *sta =
+        __atomic_load_n(&g_rtw88_sta, __ATOMIC_ACQUIRE);
+    if (!sta || vif != g_rtw88_sta_vif || !addr)
+        return NULL;
+    return memcmp(sta->addr, addr, ETH_ALEN) == 0 ? sta : NULL;
+}
 
 struct ieee80211_sta *ieee80211_find_sta_by_ifaddr(struct ieee80211_hw *hw,
                                                     const u8 *addr,
                                                     const u8 *localaddr)
-{ (void)hw; (void)addr; (void)localaddr; return NULL; }
+{
+    struct ieee80211_sta *sta =
+        __atomic_load_n(&g_rtw88_sta, __ATOMIC_ACQUIRE);
+    if (!sta || !addr || !localaddr || !g_rtw88_sta_vif)
+        return NULL;
+    if (memcmp(sta->addr, addr, ETH_ALEN) != 0 ||
+        memcmp(g_rtw88_sta_vif->addr, localaddr, ETH_ALEN) != 0)
+        return NULL;
+    return sta;
+}
 
 struct sk_buff *ieee80211_proberesp_get(struct ieee80211_hw *hw,
                                          struct ieee80211_vif *vif)
