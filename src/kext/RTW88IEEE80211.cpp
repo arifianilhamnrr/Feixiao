@@ -1962,17 +1962,27 @@ IOReturn RTW88IEEE80211::cmdConnect(const char *ssid, const char *password)
      * after moving between rooms. */
     IOLockLock(_bssLock);
     RTW88BSS *target = nullptr;
+    RTW88BSS *target5GHz = nullptr;
     for (RTW88BSS *b = _bssList; b; b = b->next) {
         if (strlen(b->ssid) == strlen(ssid) &&
             memcmp(b->ssid, ssid, strlen(ssid)) == 0) {
             if (!target || b->rssi > target->rssi)
                 target = b;
+            if (b->channel > 14 &&
+                (!target5GHz || b->rssi > target5GHz->rssi))
+                target5GHz = b;
         }
     }
     if (!target) {
         IOLockUnlock(_bssLock);
         return kIOReturnNotFound;
     }
+    /* Prefer the much wider 5 GHz link when it is still strong enough to be
+     * useful. Comparing RSSI alone unfairly favors 2.4 GHz and can pin a
+     * dual-band ESS to a congested 20 MHz channel. */
+    if (target5GHz && target5GHz->rssi >= -70 &&
+        target5GHz->rssi >= target->rssi - 15)
+        target = target5GHz;
     memcpy(&_targetBSS, target, sizeof(_targetBSS));
     IOLockUnlock(_bssLock);
 
