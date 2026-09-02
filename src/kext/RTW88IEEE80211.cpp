@@ -1956,14 +1956,17 @@ IOReturn RTW88IEEE80211::cmdConnect(const char *ssid, const char *password)
     clearKeys();
     releaseSta();
 
-    /* Find the SSID in our BSS list */
+    /* An ESS commonly exposes the same SSID from many access points.  Pick
+     * the strongest current candidate instead of whichever beacon happened
+     * to be inserted first; the latter strands clients on a distant BSSID
+     * after moving between rooms. */
     IOLockLock(_bssLock);
     RTW88BSS *target = nullptr;
     for (RTW88BSS *b = _bssList; b; b = b->next) {
         if (strlen(b->ssid) == strlen(ssid) &&
             memcmp(b->ssid, ssid, strlen(ssid)) == 0) {
-            target = b;
-            break;
+            if (!target || b->rssi > target->rssi)
+                target = b;
         }
     }
     if (!target) {
@@ -1972,6 +1975,12 @@ IOReturn RTW88IEEE80211::cmdConnect(const char *ssid, const char *password)
     }
     memcpy(&_targetBSS, target, sizeof(_targetBSS));
     IOLockUnlock(_bssLock);
+
+    IOLog("rtw88: selected strongest BSSID %02x:%02x:%02x:%02x:%02x:%02x "
+          "for '%s' (RSSI=%d channel=%u)\n",
+          _targetBSS.bssid[0], _targetBSS.bssid[1], _targetBSS.bssid[2],
+          _targetBSS.bssid[3], _targetBSS.bssid[4], _targetBSS.bssid[5],
+          _targetBSS.ssid, _targetBSS.rssi, _targetBSS.channel);
 
     strlcpy(_password, password ? password : "", sizeof(_password));
     _wpa2 = (_targetBSS.cipher == WLAN_CIPHER_SUITE_CCMP);
