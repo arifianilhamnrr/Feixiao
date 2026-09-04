@@ -407,8 +407,10 @@ void RTW88PCIDevice::debugTimerFired(IOTimerEventSource *src)
     unsigned int avail = rtw88_be_tx_avail();
     if (_txStalled && avail >= kRTW88TxResumeAvail)
         resumeTxIfStalled();
-    if (_txStalled || avail < kRTW88TxStallAvail)
+    if (_txStalled || avail < kRTW88TxStallAvail) {
         rtw88_debug_dump_tx_state();
+        rtw88_rekick_stalled_be();
+    }
     src->setTimeoutMS(1000);   /* re-arm */
 }
 

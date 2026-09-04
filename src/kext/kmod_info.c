@@ -13,7 +13,7 @@
 extern kern_return_t _start(kmod_info_t *, void *);
 extern kern_return_t _stop(kmod_info_t *, void *);
 
-KMOD_EXPLICIT_DECL(com.rtw88.driver, "1.1.8", _start, _stop)
+KMOD_EXPLICIT_DECL(com.rtw88.driver, "1.1.9", _start, _stop)
 
 extern int  rtw88_compat_init(void);
 extern void rtw88_compat_exit(void);

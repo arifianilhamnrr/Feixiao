@@ -1089,6 +1089,47 @@ void rtw88_debug_dump_tx_state(void)
           (hisr0 & RTW88_DBG_IMR_BEDOK) ? 1 : 0);
 }
 
+bool rtw88_rekick_stalled_be(void)
+{
+    static u32 last_hw_rp;
+    static u8 unchanged;
+
+    if (!g_irq_dev_id) return false;
+    struct rtw_dev *rtwdev = (struct rtw_dev *)g_irq_dev_id;
+    u32 bd_idx = rtw_read32(rtwdev, RTW88_DBG_RTK_PCI_TXBD_IDX_BEQ);
+    u32 hw_wp = bd_idx & RTW88_DBG_TRX_BD_IDX_MASK;
+    u32 hw_rp = (bd_idx >> 16) & RTW88_DBG_TRX_BD_IDX_MASK;
+    u32 sw_wp = 0, sw_rp = 0, qlen = 0;
+    rtw88_get_be_ring_state(rtwdev, &sw_wp, &sw_rp, &qlen);
+
+    if (!qlen || hw_wp == hw_rp) {
+        unchanged = 0;
+        last_hw_rp = hw_rp;
+        return false;
+    }
+
+    if (hw_rp != last_hw_rp) {
+        unchanged = 0;
+        last_hw_rp = hw_rp;
+        return false;
+    }
+
+    if (++unchanged < 2)
+        return false;
+
+    unchanged = 0;
+    /* Re-publish the existing producer index. The full barrier orders all
+     * descriptor and bounce-buffer writes before the MMIO doorbell, while the
+     * readback flushes a posted PCIe write. */
+    __sync_synchronize();
+    rtw_write16(rtwdev, RTW88_DBG_RTK_PCI_TXBD_IDX_BEQ,
+                sw_wp & RTW88_DBG_TRX_BD_IDX_MASK);
+    (void)rtw_read32(rtwdev, RTW88_DBG_RTK_PCI_TXBD_IDX_BEQ);
+    IOLog("rtw88: re-kicked stalled BE TX ring (rp=%u wp=%u qlen=%u)\n",
+          hw_rp, sw_wp, qlen);
+    return true;
+}
+
 bool rtw88_is_scanning(void)
 {
     if (!g_rtw88_hw || !g_rtw88_hw->priv) return false;

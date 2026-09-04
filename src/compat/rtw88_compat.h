@@ -157,6 +157,7 @@ void rtw88_reenable_interrupt(void);
 /* Dump BE TX ring + interrupt state to IOLog. Called periodically by the
  * kext's debug timer to diagnose TX freeze; see rtw88_compat.c. */
 void rtw88_debug_dump_tx_state(void);
+bool rtw88_rekick_stalled_be(void);
 
 /* Force-disable BT coexistence by clearing efuse.btcoex. Must be called
  * between rtw_pci_probe and the chip's start() op. See rtw88_compat.c. */

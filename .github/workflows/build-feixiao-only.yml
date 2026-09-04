@@ -41,7 +41,7 @@ jobs:
           test -z "$(git -C rtw88-stable status --porcelain)"
           test "$(git -C rtw88-stable rev-parse HEAD)" = d029a677c49266fad86750714eb5612becd134d3
           plutil -lint Feixiao/build/out/rtw88.kext/Contents/Info.plist
-          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = 1.1.8
+          test "$(defaults read "$PWD/Feixiao/build/out/rtw88.kext/Contents/Info" CFBundleVersion)" = 1.1.9
           dwarfdump --uuid Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
           shasum -a 256 Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88
 
@@ -49,11 +49,11 @@ jobs:
         run: |
           uuid="$(dwarfdump --uuid Feixiao/build/out/rtw88.kext/Contents/MacOS/rtw88 | awk '{print $2}')"
           cd Feixiao/build/out
-          zip -r "${RUNNER_TEMP}/Feixiao_1.1.8_${uuid}.zip" rtw88.kext rtw88ctl
+          zip -r "${RUNNER_TEMP}/Feixiao_1.1.9_${uuid}.zip" rtw88.kext rtw88ctl
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Feixiao-1.1.8-tx-ba-fix
-          path: ${{ runner.temp }}/Feixiao_1.1.8_*.zip
+          name: Feixiao-1.1.9-tx-rekick
+          path: ${{ runner.temp }}/Feixiao_1.1.9_*.zip
           if-no-files-found: error
