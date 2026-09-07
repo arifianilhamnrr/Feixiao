@@ -749,11 +749,12 @@ void RTW88PCIDevice::injectRxFrame(mbuf_t m)
         return;
     }
 
-    /* Queue + flush, matching the proven itlwm submission path.  Submitting
-     * via the input queue keeps frame delivery off whatever thread called us. */
-    _iface->inputPacket(m, (UInt32)plen,
-                        IONetworkInterface::kInputOptionQueuePacket);
-    _iface->flushInputQueue();
+    /* Bypass IONetworkInterface's lockless input queue. Normal RX arrives on
+     * the NAPI thread_call while reorder timeout delivery runs on our
+     * IOWorkLoop, so queue+flush can execute concurrently and corrupt the
+     * m_nextpkt list. A chain segment without M_PKTHDR is then interpreted as
+     * a packet head by dlil and panics later on its asynchronous input thread. */
+    _iface->inputPacket(m, (UInt32)plen, 0);
 
     IONetworkData *nd = _iface->getNetworkData(kIONetworkStatsKey);
     if (nd) {
