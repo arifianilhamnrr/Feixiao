@@ -593,6 +593,9 @@ struct ieee80211_tx_info {
 
 static inline struct ieee80211_tx_info *IEEE80211_SKB_CB(struct sk_buff *skb)
 {
+    /* Valid in both the C core and C++ wrapper build. */
+    typedef char rtw88_tx_info_must_fit_cb[
+        sizeof(struct ieee80211_tx_info) <= sizeof(skb->cb) ? 1 : -1];
     return (struct ieee80211_tx_info *)skb->cb;
 }
 
