@@ -2129,6 +2129,11 @@ void RTW88IEEE80211::doAssociate()
 
 void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
 {
+    if (skb->len < sizeof(struct ieee80211_hdr_3addr) + 6) {
+        kfree_skb(skb);
+        _state = RTW88_STATE_IDLE;
+        return;
+    }
     /* Assoc-resp body (after 24-byte 802.11 hdr):
      * capability(2), status(2), AID(2), [IEs...] */
     /* Reject an assoc response that isn't from our target AP (see auth path). */
@@ -2144,15 +2149,15 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
 
     const uint8_t *body    = skb->data + sizeof(struct ieee80211_hdr_3addr);
     uint32_t       bodylen = skb->len  - sizeof(struct ieee80211_hdr_3addr);
-    kfree_skb(skb);
-
     if (bodylen < 6) {
         IOLog("rtw88: assoc-resp too short\n");
+        kfree_skb(skb);
         _state = RTW88_STATE_IDLE;
         return;
     }
     uint16_t status = (uint16_t)(body[2] | (body[3] << 8));
     uint16_t aid    = (uint16_t)((body[4] | (body[5] << 8)) & 0x3FFF);
+    kfree_skb(skb);
 
     if (status != 0) {
         IOLog("rtw88: assoc failed status=%u\n", status);
@@ -2203,7 +2208,11 @@ void RTW88IEEE80211::processAssocResponse(struct sk_buff *skb)
                     _sta->deflink.vht_cap = sband->vht_cap;
             }
 
-            _hw->ops->sta_add(_hw, _vif, _sta);
+            int staResult = _hw->ops->sta_add(_hw, _vif, _sta);
+            pr_info("rtw88: peer setup result=%d AID=%u bw=%u HT=%u VHT=%u\n",
+                    staResult, aid, _connChanWidth,
+                    (unsigned)_sta->deflink.ht_cap.ht_supported,
+                    (unsigned)_sta->deflink.vht_cap.vht_supported);
         }
     }
 
@@ -3157,6 +3166,12 @@ IOReturn RTW88IEEE80211::cmdGetState(struct RTW88StateResult *result)
         (_hw && _hw->ops && _hw->ops->hw_scan &&
          rtw88_hw_scan_supported(_hw)) ? 1 : 0;
     result->powered = _powered ? 1 : 0;
+    pr_info("rtw88: LINKDIAG state=%u channel=%u width=%u ht_allowed=%u tx_ba=%u ba_attempts=%u next_seq=%u rts_threshold=%u\n",
+            (unsigned)_state, (unsigned)_targetBSS.channel,
+            (unsigned)_connChanWidth, (unsigned)htAllowed(),
+            (unsigned)_txBaActive, (unsigned)_baRetryCount,
+            (unsigned)(_dataSeq & 0xfff),
+            _hw && _hw->wiphy ? _hw->wiphy->rts_threshold : 0);
 
     return kIOReturnSuccess;
 }
